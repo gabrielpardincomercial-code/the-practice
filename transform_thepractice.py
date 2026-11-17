@@ -1,24 +1,118 @@
 import os
 import re
-import json
+import glob
 
 BASE_DIR = "/Users/gabrielalvespardin/Projetos/the-practice"
-RAW_DIR = "/tmp/thepractice_raw_pages"
+RAW_PAGES_DIR = "/tmp/thepractice_raw_pages"
+RAW_FRAMER_DIR = "/tmp/thepractice_raw_framer"
+OUT_FRAMER_DIR = os.path.join(BASE_DIR, "assets", "framer")
 
-with open(os.path.join(BASE_DIR, "font_map.json"), "r", encoding="utf-8") as f:
-    font_map = json.load(f)
+os.makedirs(OUT_FRAMER_DIR, exist_ok=True)
 
-with open(os.path.join(BASE_DIR, "image_map.json"), "r", encoding="utf-8") as f:
-    image_map = json.load(f)
+def localize_asset_urls(text):
+    # 1. CMS binary database URLs inside .mjs modules
+    text = re.sub(
+        r'new URL\([\"\x27`]\./([^\"\x27`]+\.framercms)[\"\x27`]\s*,\s*[\"\x27`]https://framerusercontent\.com/modules/[^\"\x27`]+[\"\x27`]\)\.href\.replace\([\"\x27`]/modules/[\"\x27`]\s*,\s*[\"\x27`]/cms/[\"\x27`]\)',
+        r'new URL("/assets/cms/\1",location.origin).href',
+        text
+    )
 
-VIDEO_MAP = {
-    "https://framerusercontent.com/assets/jVIuBJM4gcU60UggA258l41dX4k.mp4": "assets/videos/video_about_jVIuBJM4gc.mp4",
-    "https://framerusercontent.com/assets/2MP41MyVrOgN9fBWA2c9iip4.mp4": "assets/videos/video_contact_2MP41MyVrO.mp4",
-    "https://framerusercontent.com/assets/VQURg0lhxAOJGcvarpB0CVTtdaI.mp4": "assets/videos/video_inperson_VQURg0lhxA.mp4",
-    "https://framerusercontent.com/assets/v6i8TJjAJEIEYuPQGozOr6DUiac.mp4": "assets/videos/video_therapists_v6i8TJjAJE.mp4",
-}
-sorted_fonts = sorted(font_map.items(), key=lambda x: len(x[0]), reverse=True)
-sorted_images = sorted(image_map.items(), key=lambda x: len(x[0]), reverse=True)
+    # 2. Framer site bundle URLs (.mjs, .json)
+    text = text.replace(
+        "https://framerusercontent.com/sites/5TRvxnNUmgmvZzluKM8KFv/",
+        "/assets/framer/"
+    )
+
+    # 3. Videos (.mp4)
+    text = re.sub(
+        r'https?://framerusercontent\.com/assets/([a-zA-Z0-9_\-]+\.mp4)',
+        r'/assets/videos/\1',
+        text
+    )
+
+    # 4. Fonts (.woff2 from framerusercontent/assets, fontshare, or fonts.gstatic.com)
+    text = re.sub(
+        r'https?://framerusercontent\.com/assets/([a-zA-Z0-9_\-]+\.woff2)',
+        r'/assets/fonts/\1',
+        text
+    )
+    text = re.sub(
+        r'https?://framerusercontent\.com/third-party-assets/fontshare/[^\s\"\x27`<>\\)]+/([a-zA-Z0-9_\-]+\.woff2)',
+        r'/assets/fonts/\1',
+        text
+    )
+    text = re.sub(
+        r'https?://fonts\.gstatic\.com/[^\s\"\x27`<>\\)]+/([a-zA-Z0-9_\-]+\.woff2)',
+        r'/assets/fonts/\1',
+        text
+    )
+
+    # 5. PNG assets under /assets/
+    text = re.sub(
+        r'https?://framerusercontent\.com/assets/([a-zA-Z0-9_\-]+\.png)',
+        r'/assets/images/\1',
+        text
+    )
+
+    # 6. Images under /images/ (with or without query parameters)
+    text = re.sub(
+        r'https?://framerusercontent\.com/images/([a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+)(?:\?[^\s\"\x27`<>\\)]*)?',
+        r'/assets/images/\1',
+        text
+    )
+
+    return text
+
+print("--- 1. Transforming 115 Framer Runtime Modules (.mjs & .json) ---")
+for src_path in sorted(glob.glob(os.path.join(RAW_FRAMER_DIR, "*"))):
+    fname = os.path.basename(src_path)
+    dest_path = os.path.join(OUT_FRAMER_DIR, fname)
+    with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    content = localize_asset_urls(content)
+
+    # Patch static .framercms range reader so full-file HTTP 200 responses slice cleanly
+    if 'Unexpected response length' in content:
+        content = content.replace(
+            'if(l.length!==i)throw Error(`Request failed: Unexpected response length`);',
+            'if(l.length!==i)return t.map(e=>l.slice(e.from,e.to));'
+        )
+        print(f"  [PATCHED] {fname} (static .framercms byte-range slicer)")
+
+    # Specific runtime patches for framer.C04ER222.mjs
+    if fname == "framer.C04ER222.mjs":
+        # Patch co(e,t) so any CMS image URL or relative path resolves to local /assets/images/ without query string
+        old_co = 'function co(e,t){try{let n=new URL(e);return t?n.searchParams.set(`scale-down-to`,`${t}`):n.searchParams.delete(`scale-down-to`),n.toString()}catch{return e}}'
+        new_co = 'function co(e,t){return typeof e=="string"?e.replace(/^https?:\\/\\/framerusercontent\\.com\\/images\\/([^?#]+).*$/,"/assets/images/$1"):e}'
+        assert old_co in content, "old_co not found in framer.C04ER222.mjs"
+        content = content.replace(old_co, new_co)
+
+        # Patch fo(e,t,n) so it returns clean local src and no broken scale-down-to srcSet
+        old_fo = 'function fo(e,t,n){if(![`auto`,`lossless`].includes(t.preferredSize??``))return{src:n,srcSet:void 0};if(e){let r=uo(n,t,e);if(!r?.length)return{src:n,srcSet:void 0};let[i,...a]=r;return{src:i?.src,srcSet:a.map(({src:e,scale:t})=>`${e} ${t}x`).join(`, `)}}else return{src:n,srcSet:lo(n,t,so(t.pixelWidth,t.pixelHeight))}}'
+        new_fo = 'function fo(e,t,n){return{src:co(n),srcSet:void 0}}'
+        assert old_fo in content, "old_fo not found in framer.C04ER222.mjs"
+        content = content.replace(old_fo, new_fo)
+
+        # Patch B_(e,t) so CMS responsive images never throw Invalid URL on relative paths and rewrite to local /assets/images/
+        old_B = 'function B_(e,t){if(!e||!t?.src)return t;let n=new URL(t.src);return n.searchParams.delete(`scale-down-to`),n.searchParams.delete(`lossless`),{...t,sizes:`min(100vw, ${e.maxWidth-z_(e)}px)`,srcSet:fo(t.nodeFixedSize,t,t.src).srcSet}}'
+        new_B = 'function B_(e,t){if(!e||!t?.src)return t;let s=co(t.src);return{...t,src:s,sizes:`min(100vw, ${e.maxWidth-z_(e)}px)`,srcSet:void 0}}'
+        assert old_B in content, "old_B not found in framer.C04ER222.mjs"
+        content = content.replace(old_B, new_B)
+
+        # Patch Sp(e) so image preloader accepts relative URLs
+        content = content.replace('try{new URL(e);let r=new Image;', 'try{new URL(e,location.origin);let r=new Image;')
+        print("  [PATCHED] framer.C04ER222.mjs (local image resolver + CMS binary URL mapper)")
+
+    # Specific patch for script_main.DyuqTcwS.mjs: disable Framer badge mount
+    if fname == "script_main.DyuqTcwS.mjs":
+        old_badge = '(function(){Q&&x(()=>{y(document.getElementById(`__framer-badge-container`),d(p,{},d(_(()=>import(`./PX9hIOIVM.B4rdZQIl.mjs`)))))})})()'
+        if old_badge in content:
+            content = content.replace(old_badge, '/* badge disabled */')
+            print("  [PATCHED] script_main.DyuqTcwS.mjs (disabled Framer watermark badge)")
+
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
 ROUTE_MAP = {
     "index.html": "index.html",
@@ -57,127 +151,66 @@ ROUTE_MAP = {
     "therapists_sam-whitaker.html": "therapists/sam-whitaker.html",
 }
 
-# List of internal link targets to rewrite cleanly
-INTERNAL_LINKS = [
-    ("services/individual-therapy", "services/individual-therapy.html"),
-    ("services/couples-therapy", "services/couples-therapy.html"),
-    ("services/teens-families", "services/teens-families.html"),
-    ("services/online-therapy", "services/online-therapy.html"),
-    ("blog/how-to-know-when-its-time-to-start-therapy", "blog/how-to-know-when-its-time-to-start-therapy.html"),
-    ("blog/anxiety-explained-why-your-body-sounds-the-alarm", "blog/anxiety-explained-why-your-body-sounds-the-alarm.html"),
-    ("blog/five-small-habits-for-a-calmer-nervous-system", "blog/five-small-habits-for-a-calmer-nervous-system.html"),
-    ("blog/fighting-fair-how-couples-can-repair-after-conflict", "blog/fighting-fair-how-couples-can-repair-after-conflict.html"),
-    ("blog/talking-to-your-teen-about-mental-health", "blog/talking-to-your-teen-about-mental-health.html"),
-    ("blog/what-to-expect-from-your-first-online-therapy-session", "blog/what-to-expect-from-your-first-online-therapy-session.html"),
-    ("therapists/maya-alvarez", "therapists/maya-alvarez.html"),
-    ("therapists/daniel-brooks", "therapists/daniel-brooks.html"),
-    ("therapists/lina-tran", "therapists/lina-tran.html"),
-    ("therapists/jordan-lee", "therapists/jordan-lee.html"),
-    ("therapists/simone-carter", "therapists/simone-carter.html"),
-    ("therapists/sam-whitaker", "therapists/sam-whitaker.html"),
-    ("about", "about.html"),
-    ("approach", "approach.html"),
-    ("therapists", "therapists.html"),
-    ("services", "services.html"),
-    ("blog", "blog.html"),
-    ("contact", "contact.html"),
-    ("in-person", "in-person.html"),
-    ("locations", "locations.html"),
-    ("online", "online.html"),
-    ("fees", "fees.html"),
-    ("how-it-works", "how-it-works.html"),
-    ("faq", "faq.html"),
-    ("privacy-policy", "privacy-policy.html"),
-    ("cancellation-policy", "cancellation-policy.html"),
-    ("accessibility", "accessibility.html"),
-    ("terms-of-use", "terms-of-use.html"),
-]
-
+print("\n--- 2. Transforming 34 HTML Pages (Preserving Native Framer Appear & Runtime) ---")
 for src_name, dest_rel in ROUTE_MAP.items():
-    src_path = os.path.join(RAW_DIR, src_name)
-    if not os.path.exists(src_path):
-        print(f"[SKIP] Missing {src_path}")
-        continue
-    
+    src_path = os.path.join(RAW_PAGES_DIR, src_name)
     dest_path = os.path.join(BASE_DIR, dest_rel)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    
+
     with open(src_path, "r", encoding="utf-8", errors="replace") as f:
         html = f.read()
 
-    # Determine prefix
-    depth = dest_rel.count("/")
-    prefix = "../" * depth if depth > 0 else "./"
+    # Localize all URLs to root-relative /assets/...
+    html = localize_asset_urls(html)
 
-    # 1. Localize fonts
-    for orig_url, local_rel in sorted_fonts:
-        html = html.replace(orig_url, f"{prefix}{local_rel}")
-
-    # 2. Localize images & videos
-    for orig_url, local_rel in sorted_images:
-        html = html.replace(orig_url, f"{prefix}{local_rel}")
-    
-    for v_url, v_rel in VIDEO_MAP.items():
-        html = html.replace(v_url, f"{prefix}{v_rel}")
-
-    # Specific 404 image replacement if query string remains
-    html = re.sub(r'https?://framerusercontent\.com/images/FTcWo8sn6DIYSpkkcnlQESRzzY\.jpg(?:\?[^\'"\s<>]*)?', f'{prefix}assets/images/img_404_FTcWo8sn6DIY.jpg', html)
-
-    # 3. Strip srcset from <img> to enforce local src loading
+    # Strip srcset attributes from SSR <img> tags so browser uses crisp local src
     html = re.sub(r'\ssrcset=[\'"][^\'"]*[\'"]', '', html)
 
-    # 4. Decouple Framer Runtime Scripts & Preloads
-    html = re.sub(r'<script\b[^>]*\bsrc=[\'"][^\'"]*(?:events\.framer\.com|script_main)[^\'"]*[\'"][^>]*>[\s\S]*?<\/script>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<script\b[^>]*\btype=[\'"]framer/(?:appear|handover)[\'"][^>]*>[\s\S]*?<\/script>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<script\b[^>]*\bdata-framer-appear-animation=[^>]*>[\s\S]*?<\/script>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<script\b[^>]*\bdata-framer-bundle=[\'"]main[\'"][^>]*>[\s\S]*?<\/script>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<link\b[^>]*\brel=[\'"]modulepreload[\'"][^>]*>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<meta\b[^>]*\bname=[\'"]framer-[^\'"]*[\'"][^>]*>', '', html, flags=re.IGNORECASE)
-    html = re.sub(r'<link\b[^>]*searchIndex[^\>]*>', '', html, flags=re.IGNORECASE)
-
-    # 5. Unlock SSR initial hidden states
-    # Unhide opacity: 0 and 0.001
-    html = re.sub(r'opacity:\s*0\.001(?=[;\"\'\s])', 'opacity: 1', html)
-    # Unlock translateY and blur
-    html = re.sub(r'filter:\s*blur\([^)]+\)', 'filter: none', html)
-    html = re.sub(r'transform:\s*translateY\([0-9\.\-]+px\)', 'transform: translateY(0px)', html)
-    html = re.sub(r'will-change:\s*transform', 'will-change: auto', html)
-    
-    # Specific unhiding for Sticky Nav and Accordions
-    html = re.sub(r'style="[^"]*opacity:\s*0(?:\.001)?[^"]*"', lambda m: m.group(0).replace('opacity:0.001', 'opacity:1').replace('opacity: 0.001', 'opacity: 1').replace('opacity:0', 'opacity:1').replace('opacity: 0', 'opacity: 1'), html)
-
-    # 6. Normalize internal navigation links
-    # Root link
-    html = re.sub(r'href=[\'"]\./[\'"]', f'href="{prefix}index.html"', html)
-    html = re.sub(r'href=[\'"]https://thepractice\.framer\.website/?[\'"]', f'href="{prefix}index.html"', html)
-    
-    for route_slug, route_dest in INTERNAL_LINKS:
-        # replace href="./route_slug" or href="/route_slug"
-        html = re.sub(r'href=[\'"](?:\./|/)' + re.escape(route_slug) + r'/?[\'"]', f'href="{prefix}{route_dest}"', html)
-        html = re.sub(r'href=[\'"]https://thepractice\.framer\.website/' + re.escape(route_slug) + r'/?[\'"]', f'href="{prefix}{route_dest}"', html)
-
-    # 7. Inject Custom Stylesheet & Interactive JS Engine
-    css_link = f'<link rel="stylesheet" href="{prefix}assets/css/main.css">'
-    js_script = (
-        f'<script src="{prefix}assets/js/lenis.min.js"></script>\n'
-        f'<script src="{prefix}assets/js/gsap.min.js"></script>\n'
-        f'<script src="{prefix}assets/js/ScrollTrigger.min.js"></script>\n'
-        f'<script src="{prefix}assets/js/main.js"></script>'
+    # Strip ONLY Framer telemetry & editorbar injection script
+    html = re.sub(
+        r'<script\b[^>]*\bsrc=[\'"][^\'"]*events\.framer\.com[^\'"]*[\'"][^>]*>[\s\S]*?<\/script>',
+        '',
+        html,
+        flags=re.IGNORECASE
+    )
+    html = re.sub(
+        r'<script>try\{if\(localStorage\.getItem\("__framer_force_showing_editorbar_since"\)\)[\s\S]*?<\/script>',
+        '',
+        html
     )
 
+    # Update canonical and og:url to https://thepractice.landingprofile.com
+    html = html.replace("https://thepractice.framer.website", "https://thepractice.landingprofile.com")
+
+    # Normalize all internal relative hrefs (./foo, ../foo, ./) to root-relative (/foo, /)
+    # In subpages (services/*, blog/*, therapists/*), ./slug links point within the same collection folder
+    depth = dest_rel.count("/")
+    if depth == 1:
+        folder = dest_rel.split("/")[0]
+        # ./couples-therapy -> /services/couples-therapy
+        html = re.sub(r'href=[\'"]\./([^\'"#]+)(#[^\'"<>]*)?[\'"]', rf'href="/{folder}/\1\2"', html)
+        # ../about -> /about, ../ -> /
+        html = re.sub(r'href=[\'"]\.\./([^\'"]*)[\'"]', r'href="/\1"', html)
+    else:
+        # ./about -> /about, ./ -> /
+        html = re.sub(r'href=[\'"]\./([^\'"]*)[\'"]', r'href="/\1"', html)
+
+    # Inject clean CSS override for hiding #__framer-badge-container
+    css_link = '<link rel="stylesheet" href="/assets/css/main.css">'
     if '</head>' in html:
         html = html.replace('</head>', f'{css_link}\n</head>')
-    else:
-        html = css_link + html
-
-    if '</body>' in html:
-        html = html.replace('</body>', f'{js_script}\n</body>')
-    else:
-        html = html + js_script
 
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(html)
-    
-    print(f"Processed: {src_name} -> {dest_rel} ({len(html)} bytes)")
 
-print("\n--- All 34 Pages Transformed Successfully ---")
+    # Also write index.html inside services/, blog/, therapists/ so trailing-slash URLs (/therapists/) return 200 natively
+    if dest_rel in ("services.html", "blog.html", "therapists.html"):
+        folder_index = os.path.join(BASE_DIR, dest_rel[:-5], "index.html")
+        os.makedirs(os.path.dirname(folder_index), exist_ok=True)
+        with open(folder_index, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"  [OK] {dest_rel[:-5]}/index.html (trailing-slash fallback)")
+
+    print(f"  [OK] {dest_rel}")
+
+print("\n--- Transformation Complete! ---")
