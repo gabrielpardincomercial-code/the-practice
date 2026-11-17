@@ -1,9 +1,180 @@
 /**
- * The Practice - Standalone Interactive Engine
+ * The Practice - Complete Standalone Interactive & Animation Engine
+ * Lenis Smooth Scroll + GSAP ScrollTrigger + FAQ Accordions + Mobile Nav
  */
 
 document.addEventListener("DOMContentLoaded", () => {
-  // --- 1. FAQ Accordion Engine ---
+  // ==========================================
+  // 1. LENIS SMOOTH SCROLL ENGINE
+  // ==========================================
+  let lenis = null;
+  if (typeof Lenis !== "undefined") {
+    try {
+      lenis = new Lenis({
+        duration: 1.2,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        orientation: "vertical",
+        gestureOrientation: "vertical",
+        smoothWheel: true,
+        wheelMultiplier: 1.0,
+        touchMultiplier: 1.5,
+      });
+
+      window.lenisInstance = lenis;
+
+      if (typeof gsap !== "undefined" && typeof ScrollTrigger !== "undefined") {
+        gsap.registerPlugin(ScrollTrigger);
+        lenis.on("scroll", ScrollTrigger.update);
+        gsap.ticker.add((time) => {
+          lenis.raf(time * 1000);
+        });
+        gsap.ticker.lagSmoothing(0);
+      } else {
+        function raf(time) {
+          lenis.raf(time);
+          requestAnimationFrame(raf);
+        }
+        requestAnimationFrame(raf);
+      }
+    } catch (e) {
+      console.warn("Lenis initialization error:", e);
+    }
+  }
+
+  // ==========================================
+  // 2. GSAP ENTRANCE & SCROLL ANIMATIONS
+  // ==========================================
+  if (typeof gsap !== "undefined") {
+    // --- A. Hero Entrance Animations ---
+    const navBar = document.querySelector('[data-framer-name="Sticky Nav"], .framer-1aprlq');
+    if (navBar) {
+      gsap.fromTo(
+        navBar,
+        { y: -25, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.9, ease: "power2.out", delay: 0.1 }
+      );
+    }
+
+    const heroBadge = document.querySelector('[data-framer-name="Badge"], [data-framer-appear-id="1n7qfv1"]');
+    if (heroBadge) {
+      gsap.fromTo(
+        heroBadge,
+        { y: 20, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.9, ease: "power2.out", delay: 0.25 }
+      );
+    }
+
+    const heroTitle = document.querySelector('h1, [data-framer-appear-id="yklkly"]');
+    if (heroTitle) {
+      gsap.fromTo(
+        heroTitle,
+        { y: 26, opacity: 0 },
+        { y: 0, opacity: 1, duration: 1.0, ease: "power2.out", delay: 0.35 }
+      );
+    }
+
+    const heroDesc = document.querySelector('[data-framer-appear-id="lbmwvp"]');
+    if (heroDesc) {
+      gsap.fromTo(
+        heroDesc,
+        { y: 20, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.9, ease: "power2.out", delay: 0.5 }
+      );
+    }
+
+    const heroButtons = document.querySelector('[data-framer-appear-id="1hevfue"]');
+    if (heroButtons) {
+      gsap.fromTo(
+        heroButtons,
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.85, ease: "power2.out", delay: 0.65 }
+      );
+    }
+
+    const heroDisplayText = document.querySelector('[data-framer-appear-id="thvx7m"]');
+    if (heroDisplayText) {
+      gsap.fromTo(
+        heroDisplayText,
+        { y: 65, opacity: 0 },
+        { y: 0, opacity: 1, duration: 1.2, ease: "power3.out", delay: 0.4 }
+      );
+    }
+
+    // --- B. ScrollTrigger Reveals for Sections & Cards ---
+    if (typeof ScrollTrigger !== "undefined") {
+      // Animate section headings & titles
+      const headings = document.querySelectorAll("h2, h3, h4");
+      headings.forEach((heading) => {
+        // Skip elements already in the above-the-fold hero
+        if (heading.closest('[data-framer-name="Hero"]') || heading.closest('.framer-1aprlq')) return;
+        gsap.fromTo(
+          heading,
+          { y: 30, opacity: 0 },
+          {
+            y: 0,
+            opacity: 1,
+            duration: 0.85,
+            ease: "power2.out",
+            scrollTrigger: {
+              trigger: heading,
+              start: "top 88%",
+              toggleActions: "play none none none",
+              once: true,
+            },
+          }
+        );
+      });
+
+      // Animate cards (services, therapists, blog items)
+      const cards = document.querySelectorAll(
+        '[data-framer-name="Card"], [data-framer-name="Item"], [data-framer-name="Therapist"], [data-framer-name="Article"], [data-framer-name="Row"]'
+      );
+      cards.forEach((card) => {
+        if (card.closest('[data-framer-name="Hero"]') || card.closest('.framer-1aprlq')) return;
+        gsap.fromTo(
+          card,
+          { y: 35, opacity: 0 },
+          {
+            y: 0,
+            opacity: 1,
+            duration: 0.8,
+            ease: "power2.out",
+            scrollTrigger: {
+              trigger: card,
+              start: "top 90%",
+              toggleActions: "play none none none",
+              once: true,
+            },
+          }
+        );
+      });
+
+      // Subtle parallax on large images
+      const parallaxImages = document.querySelectorAll('img[src*="assets/images/"]');
+      parallaxImages.forEach((img) => {
+        if (img.clientHeight > 350) {
+          gsap.fromTo(
+            img,
+            { y: -15 },
+            {
+              y: 15,
+              ease: "none",
+              scrollTrigger: {
+                trigger: img,
+                start: "top bottom",
+                end: "bottom top",
+                scrub: 1,
+              },
+            }
+          );
+        }
+      });
+    }
+  }
+
+  // ==========================================
+  // 3. FAQ ACCORDION ENGINE
+  // ==========================================
   const FAQ_DATA = {
     "How do I know if therapy is right for me?": "There’s no wrong reason to reach out. If something is weighing on you, affecting your sleep, work or relationships — or you simply want space to think — therapy can help. A free consultation is a no-pressure way to find out.",
     "How do I get started?": "Just request a free 15-minute consultation through our website. We’ll reach out to learn a little about what you’re looking for and match you with the right therapist on our team.",
@@ -30,49 +201,49 @@ document.addEventListener("DOMContentLoaded", () => {
     "What if I’m in crisis?": "We are an outpatient practice and not an emergency service. If you are experiencing a mental health emergency, please call or text 988 or go to the nearest emergency room immediately."
   };
 
-  // Find all question cards (target the inner interactive card uniquely)
-  const questionElements = document.querySelectorAll('.framer-0BDWv');
-  questionElements.forEach((el) => {
-    // Find the question text
-    const heading = el.querySelector("h5, [data-framer-name='Question']");
+  const questionCards = document.querySelectorAll(".framer-0BDWv");
+  questionCards.forEach((card) => {
+    const heading = card.querySelector("h5, [data-framer-name='Question']");
     if (!heading) return;
     const qText = heading.textContent.trim();
     const answer = FAQ_DATA[qText];
     if (!answer) return;
 
-    // Make interactive cursor
-    el.style.cursor = "pointer";
+    card.style.cursor = "pointer";
 
-    // Create answer container
-    let answerBox = el.querySelector(".faq-answer-box");
+    let answerBox = card.querySelector(".faq-answer-box");
     if (!answerBox) {
       answerBox = document.createElement("div");
       answerBox.className = "faq-answer-box";
       answerBox.style.display = "none";
       answerBox.textContent = answer;
-      el.appendChild(answerBox);
+      card.appendChild(answerBox);
     }
 
-    const iconSvg = el.querySelector("[data-framer-name='Icon'] svg");
+    const iconSvg = card.querySelector("[data-framer-name='Icon'] svg");
     if (iconSvg) {
       iconSvg.classList.add("faq-icon-rotator");
     }
 
-    el.addEventListener("click", (e) => {
+    card.addEventListener("click", (e) => {
       e.stopPropagation();
-      const isOpen = el.classList.contains("faq-open");
+      const isOpen = card.classList.contains("faq-open");
       if (isOpen) {
-        el.classList.remove("faq-open");
+        card.classList.remove("faq-open");
         answerBox.style.display = "none";
       } else {
-        el.classList.add("faq-open");
+        card.classList.add("faq-open");
         answerBox.style.display = "block";
       }
     });
   });
 
-  // --- 2. Mobile Navigation Toggle ---
-  const menuButtons = document.querySelectorAll('[data-framer-name="Menu Button"], button[aria-label="Toggle menu"]');
+  // ==========================================
+  // 4. MOBILE NAVIGATION TOGGLE
+  // ==========================================
+  const menuButtons = document.querySelectorAll(
+    '[data-framer-name="Menu Button"], button[aria-label="Toggle menu"]'
+  );
   menuButtons.forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -80,6 +251,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const nav = btn.closest("nav");
       if (nav) {
         nav.classList.toggle("mobile-nav-open");
+      }
+    });
+  });
+
+  // ==========================================
+  // 5. SMOOTH ANCHOR SCROLL
+  // ==========================================
+  document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+    anchor.addEventListener("click", function (e) {
+      const targetId = this.getAttribute("href").slice(1);
+      if (!targetId) return;
+      const targetEl = document.getElementById(targetId) || document.querySelector(`[data-framer-name="${targetId}"]`);
+      if (targetEl) {
+        e.preventDefault();
+        if (window.lenisInstance) {
+          window.lenisInstance.scrollTo(targetEl, { offset: -60, duration: 1.2 });
+        } else {
+          targetEl.scrollIntoView({ behavior: "smooth" });
+        }
       }
     });
   });

@@ -158,7 +158,12 @@ for src_name, dest_rel in ROUTE_MAP.items():
 
     # 7. Inject Custom Stylesheet & Interactive JS Engine
     css_link = f'<link rel="stylesheet" href="{prefix}assets/css/main.css">'
-    js_script = f'<script src="{prefix}assets/js/main.js"></script>'
+    js_script = (
+        f'<script src="{prefix}assets/js/lenis.min.js"></script>\n'
+        f'<script src="{prefix}assets/js/gsap.min.js"></script>\n'
+        f'<script src="{prefix}assets/js/ScrollTrigger.min.js"></script>\n'
+        f'<script src="{prefix}assets/js/main.js"></script>'
+    )
 
     if '</head>' in html:
         html = html.replace('</head>', f'{css_link}\n</head>')
